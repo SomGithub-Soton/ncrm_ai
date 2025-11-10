@@ -1,0 +1,217 @@
+---
+title: "Breast Cancer Wisconsin Diagnostic — Exploratory Analysis"
+author: "Somnath Chaudhuri"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+  html_document:
+    toc: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
+
+# Load required libraries
+library(readr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(GGally)
+library(DataExplorer)
+library(patchwork)
+library(corrplot)
+library(factoextra)
+library(reshape2)
+```
+
+# Introduction
+
+This short training document shows step-by-step exploratory data analysis (EDA) for the **Breast Cancer Wisconsin (Diagnostic)** dataset.  
+The goal is to demonstrate a compact, reproducible workflow with clear interpretations before modeling.
+
+# Data loading and structure
+
+```{r data-load}
+# Load data and column names
+breastCancerData <- read_csv(
+  "https://archive.ics.uci.edu/ml/machine-learning-databases/breast-cancer-wisconsin/wdbc.data",
+  col_names = FALSE
+)
+
+breastCancerDataColNames <- read_csv(
+  "https://raw.githubusercontent.com/fpsom/2020-07-machine-learning-sib/master/data/wdbc.colnames.csv",
+  col_names = FALSE
+)
+
+# Check counts match
+ncol(breastCancerData)
+nrow(breastCancerDataColNames)
+
+# Assign names safely
+if (nrow(breastCancerDataColNames) == ncol(breastCancerData)) {
+  colnames(breastCancerData) <- breastCancerDataColNames$X1
+} else {
+  stop("Column name count does not match data columns. Please verify column source.")
+}
+
+# Clean column names for safe reference
+colnames(breastCancerData) <- make.names(colnames(breastCancerData))
+
+# Convert diagnosis to factor
+breastCancerData$Diagnosis <- as.factor(breastCancerData$Diagnosis)
+
+# Remove first column
+breastCancerData <- breastCancerData[2:ncol(breastCancerData)]
+
+# Quick checks
+dim(breastCancerData)
+names(breastCancerData)
+head(breastCancerData)
+summary(breastCancerData$diagnosis)
+```
+
+**Inference:** The dataset has 569 observations and 32 variables. The response variable `diagnosis` has two levels: *M (Malignant)* and *B (Benign)*.
+
+# Missingness and overview
+
+```{r data-intro}
+plot_intro(breastCancerData)
+plot_missing(breastCancerData)
+```
+
+**Observation:** No missing data — the dataset is complete and balanced for analysis.
+
+
+# Using first 6 columns of the dataset to explore
+
+```{r drop}
+breastCancerData <- breastCancerData%>% select(1:6)
+# Quick checks
+dim(breastCancerData)
+names(breastCancerData)
+head(breastCancerData)
+```
+
+# Univariate distributions
+
+```{r univariate}
+num_cols <- breastCancerData %>% select(where(is.numeric))
+long_df <- num_cols %>%
+pivot_longer(cols = everything(), names_to = "variable", values_to = "value")
+
+p_density <- ggplot(long_df, aes(x = value, fill = variable)) +
+geom_density(alpha = 0.5) +
+facet_wrap(~variable, scales = "free", ncol = 3) +
+labs(title = "Density plots for selected numeric variables") +
+theme_minimal() +
+theme(legend.position = "none")
+
+p_box <- ggplot(long_df, aes(x = variable, y = value, fill = variable)) +
+geom_boxplot(alpha = 0.7) +
+labs(title = "Boxplots (overview)", x = NULL) +
+theme_minimal() +
+theme(axis.text.x = element_blank(), legend.position = "none")
+
+p_density / p_box
+
+```
+
+**Inference:** Some variables (e.g., radius_mean and area_mean) are right-skewed,
+suggesting the need for scaling or transformation before modeling.
+
+# Bivariate relationships by diagnosis
+
+```{r bivariate}
+p1 <- ggplot(breastCancerData, aes(x = Radius.Mean, y = Area.Mean, color = Diagnosis)) +
+geom_point(size = 2.5, alpha = 0.8) +
+geom_smooth(method = "lm", se = FALSE, size = 0.6) +
+labs(title = "Radius vs Area by Diagnosis") +
+theme_minimal()
+
+p2 <- ggplot(breastCancerData, aes(x = Texture.Mean, y = Smoothness.Mean, color = Diagnosis)) +
+geom_point(size = 2.5, alpha = 0.8) +
+geom_smooth(method = "lm", se = FALSE, size = 0.6) +
+labs(title = "Texture vs Smoothness by Diagnosis") +
+theme_minimal()
+
+p1 / p2
+
+```
+
+**Inference:** Malignant tumors tend to have higher radius, area, and texture values.
+Benign tumors generally have lower measurements and smoother surfaces.
+
+# Distribution by diagnosis (violin plots)
+
+```{r violin}
+df_long <- breastCancerData %>%
+pivot_longer(-Diagnosis, names_to = "variable", values_to = "value")
+
+ggplot(df_long, aes(x = Diagnosis, y = value, fill = Diagnosis)) +
+geom_violin(alpha = 0.5, trim = FALSE) +
+geom_boxplot(width = 0.15, outlier.size = 1, alpha = 0.9) +
+facet_wrap(~variable, scales = "free", ncol = 3) +
+labs(title = "Variable distribution by Diagnosis", x = "Diagnosis", y = "Value") +
+theme_minimal() +
+theme(legend.position = "none")
+```
+
+**Inference:** Malignant cases show higher radius, perimeter, area, and texture. Smoothness is slightly higher for malignant tumors.
+
+# Correlation matrix
+
+```{r corr}
+num <- breastCancerData %>% select(where(is.numeric))
+M <- cor(num)
+corrplot(M, method = "pie")
+round(M, 2)
+```
+
+**Inference:** Radius, perimeter, and area are strongly correlated. Texture and smoothness are moderately correlated with these measures.
+
+# Pairwise scatter matrix
+
+```{r ggpairs}
+ggpairs(
+breastCancerData,
+columns = 2:6,
+mapping = aes(color = Diagnosis, alpha = 0.6),
+upper = list(continuous = wrap("cor", size = 3)),
+lower = list(continuous = wrap("smooth", alpha = 0.3, size = 0.4)),
+diag = list(continuous = wrap("densityDiag", alpha = 0.5))
+)
+```
+
+**Inference:** Malignant tumors cluster in the higher ranges for radius, perimeter, and area.
+Benign tumors occupy lower ranges. Strong correlations exist among size-related features.
+
+# Feature engineering & scaling
+
+```{r features}
+# Example: area-to-radius ratio
+breastCancerData <- breastCancerData %>%
+mutate(area_to_radius = Area.Mean / Radius.Mean)
+
+summary(breastCancerData$area_to_radius)
+
+# Scale numeric features
+scaled_data <- as.data.frame(scale(breastCancerData %>% select(where(is.numeric))))
+scaled_data$Diagnosis <- breastCancerData$Diagnosis
+
+head(scaled_data)
+```
+
+**Inference:** Derived ratio captures proportionality differences.
+Scaled data ensures features contribute equally for modeling.
+
+# Pre-modelling checklist
+
+1. Classes moderately balanced between Malignant and Benign.
+2. No missing values.  
+3. High correlations among radius, area, and perimeter — consider dimensionality reduction.  
+4. Scaling and derived ratios improve comparability across features.  
+

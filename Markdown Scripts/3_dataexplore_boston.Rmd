@@ -1,0 +1,108 @@
+---
+title: "Boston Housing Dataset — Exploratory Analysis"
+author: "Somnath Chaudhuri"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
+
+library(MASS)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(GGally)
+library(DataExplorer)
+library(patchwork)
+library(corrplot)
+library(factoextra)
+library(reshape2)
+library(scales)
+```
+# Load Boston dataset
+
+```{r load}
+data("Boston")
+boston <- Boston
+
+# Quick data check
+dim(boston)
+names(boston)
+head(boston)
+summary(boston)
+
+
+# Missing values
+plot_intro(boston)
+plot_missing(boston)
+```
+
+
+# Variable explanation
+```{r var}
+var_info <- data.frame(
+Variable = names(boston),
+Description = c(
+"Per capita crime rate by town",
+"Proportion of residential land zoned for lots > 25,000 sq.ft.",
+"Proportion of non-retail business acres per town",
+"Charles River dummy variable (1 if tract bounds river; 0 otherwise)",
+"Nitric oxides concentration (parts per 10 million)",
+"Average number of rooms per dwelling",
+"Proportion of owner-occupied units built prior to 1940",
+"Weighted distances to five Boston employment centres",
+"Index of accessibility to radial highways",
+"Full-value property-tax rate per $10,000",
+"Pupil-teacher ratio by town",
+"Proportion of population that is lower status",
+"Median value of owner-occupied homes ($1000s)",
+"Derived: Tax per room (tax / average rooms)"
+)
+)
+var_info
+```
+
+# Correlation matrix
+```{r corr}
+num <- boston[, sapply(boston, is.numeric)]
+M <- cor(num)
+corrplot(M, method = "pie")
+round(M, 2)
+```
+
+# Pairwise scatter matrix 
+Charles River dummy variable:
+
+- 1 if the tract bounds the Charles River
+
+- 0 otherwise
+```{r scat}
+ggpairs(
+  boston,
+  columns = c("crim", "rm", "age", "dis", "rad", "tax", "medv"),
+  mapping = aes(color = factor(chas)),  # categorical coloring
+  lower = list(continuous = wrap("smooth", alpha = 0.3, size = 0.4)),
+  upper = list(continuous = wrap("cor", size = 3)),
+  diag = list(continuous = wrap("densityDiag", alpha = 0.5))
+)
+```
+
+# Feature engineering: tax per room
+```{r feature}
+boston <- boston %>%
+mutate(tax_per_room = tax / rm)
+summary(boston$tax_per_room)
+
+# Scale numeric features
+
+scaled_data <- as.data.frame(scale(boston[, sapply(boston, is.numeric)]))
+head(scaled_data)
+```

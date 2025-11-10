@@ -1,0 +1,197 @@
+---
+title: "Iris dataset — Exploratory analysis"
+author: "Somnath Chaudhuri"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, fig.width = 7, fig.height = 5)
+
+# install.packages(c('GGally','DataExplorer','ggplot2','dplyr','tidyr','patchwork','corrplot','factoextra','reshape2'))
+library(GGally)
+library(DataExplorer)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+library(corrplot)
+library(factoextra)
+library(reshape2)
+
+# load data
+data(iris)
+```
+
+# Introduction
+
+This short training document shows step-by-step exploratory data analysis (EDA) for the classic **Iris** dataset. The goal is to demonstrate a compact, reproducible workflow with concise interpretation notes so that learners can quickly understand key patterns before moving to modelling.
+
+We keep the structure intentionally compact (few chunks) so it is easy to read and use in a workshop or self-study.
+
+# Quick data check
+
+We start with dimension, structure and simple summaries to understand variables and missingness.
+
+```{r data-intro}
+# dimensions and first rows
+dim(iris)
+names(iris)
+head(iris)
+
+# factor levels and class balance
+levels(iris$Species)
+table(iris$Species)
+
+# summary statistics
+summary(iris)
+
+# simple missingness & intro plot
+plot_intro(iris)
+plot_missing(iris)
+```
+
+**What we are doing:** Confirm dataset size (150 observations, 5 variables), variable types (4 numeric predictors and a factor Species), class balance (equal). The `plot_missing` will confirm no missing values.
+
+# Univariate distributions
+
+Visualize distributions of numeric variables to inspect skew, spread and potential outliers.
+
+```{r univariate, fig.height=6}
+# density plots for each numeric variable
+iris_long <- iris %>% pivot_longer(cols = 1:4, names_to = "variable", values_to = "value")
+
+p_density <- ggplot(iris_long, aes(x = value, fill = variable)) +
+  geom_density(alpha = 0.5) +
+  facet_wrap(~variable, scales = 'free') +
+  labs(title = 'Density plots for numeric variables', x = NULL) +
+  theme_minimal() +
+  theme(legend.position = 'none')
+
+# boxplots (compact)
+p_box <- ggplot(iris_long, aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = 'Boxplots (overview)', x = NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(), legend.position = 'none')
+
+p_density / p_box
+```
+
+**Inference:** Petal measurements are more spread and show clear separation between species (later we will show species overlay). Sepal measurements overlap more.
+
+# Bivariate relationships (by species)
+
+We want to visualise relationships that are useful for classification: petal dimensions are known to separate species well.
+
+```{r bivariate, fig.height=6}
+# Sepal scatter
+p1 <- ggplot(iris, aes(x = Sepal.Length, y = Sepal.Width, color = Species)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = 'lm', se = FALSE, size = 0.6) +
+  labs(title = 'Sepal: Length vs Width') +
+  theme_minimal()
+
+# Petal scatter
+p2 <- ggplot(iris, aes(x = Petal.Length, y = Petal.Width, color = Species)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = 'lm', se = FALSE, size = 0.6) +
+  labs(title = 'Petal: Length vs Width') +
+  theme_minimal()
+
+# combine
+p1 / p2
+```
+
+**Inference:** Petal Length vs Petal Width gives a very clear separation of species (especially *setosa* vs others). Sepal measurements overlap more and are less separable.
+
+# Boxplots & violins by species (concise)
+
+Compare distributions across species for each variable.
+
+```{r box-by-species, fig.height=6}
+# violin + boxplot overlay for clarity
+p_v <- ggplot(iris_long, aes(x = Species, y = value, fill = Species)) +
+  geom_violin(alpha = 0.5, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.size = 1, alpha = 0.9) +
+  facet_wrap(~variable, scales = 'free', ncol = 2) +
+  labs(title = 'Distribution of variables by Species') +
+  theme_minimal() +
+  theme(legend.position = 'none')
+
+p_v
+```
+
+**Inference:** Petal variables show a stepwise increase across species: *setosa* has the smallest values, *versicolor* intermediate, *virginica* largest. Sepal differences are smaller.
+
+
+# Correlation matrix (numeric variables)
+
+A numeric correlation matrix is useful to quantify relationships.
+
+```{r corr, fig.height=4}
+num <- iris %>% select_if(is.numeric)
+M <- cor(num)
+
+corrplot(M, method = "pie")
+
+# Print matrix for reference
+round(M, 2)
+```
+
+**Inference:** Petal.Length and Petal.Width correlation is very high (>0.96). Sepal.Length moderately correlates with Petal.Length; Sepal.Width shows negative correlation with Sepal.Length.
+
+
+
+
+
+# Pairwise scatter matrix with correlations
+
+A compact pairwise plot helps detect multicollinearity and strong bivariate patterns.
+
+```{r ggpairs-block, fig.height=7}
+# Use GGally ggpairs with species colouring; limit to numeric columns
+ggpairs(iris, columns = 1:4,
+        mapping = ggplot2::aes(color = Species, alpha = 0.6),
+        upper = list(continuous = wrap('cor', size = 3)),
+        lower = list(continuous = wrap('smooth', alpha = 0.3, size = 0.4)),
+        diag = list(continuous = wrap('densityDiag', alpha = 0.5)))
+```
+
+**What to look for:** Strong correlation between Petal.Length and Petal.Width (high collinearity). This matters for some models and suggests that petal measurements are highly informative.
+
+
+
+# Quick feature engineering & readiness checks
+
+Before modelling, we often standardize and optionally create derived features. Here we show a small example (petal ratio) and a scaled dataset summary.
+
+```{r features}
+# create a simple derived feature: petal aspect (length / width)
+iris2 <- iris %>% mutate(Petal.Ratio = Petal.Length / Petal.Width)
+
+summary(iris2$Petal.Ratio)
+
+# scaled predictors ready for models
+iris_scaled <- as.data.frame(scale(iris %>% select(-Species)))
+iris_scaled$Species <- iris$Species
+
+head(iris_scaled)
+```
+
+**Inference:** Petal ratio is another discriminative feature; scaling centers predictors for algorithms that require it (SVM, k-NN, PCA, etc.).
+
+# Short checklist before modelling
+
+1. Data balance: classes are balanced (50 each).  
+2. Missing values: none.  
+3. Strong predictors: petal length/width — consider variable selection or retain all and regularize.  
+4. Feature scaling: recommended for distance-based or regularized models.  
+
