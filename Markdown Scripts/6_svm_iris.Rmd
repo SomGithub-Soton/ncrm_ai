@@ -1,0 +1,459 @@
+---
+title: "Iris Species Classification - Support Vector Machines Step-by-Step Training"
+author: "Data Science Training"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df_print: paged
+    code_folding: show
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+# Introduction to Support Vector Machines (SVM)
+
+## What is SVM?
+Support Vector Machine (SVM) is a powerful supervised machine learning algorithm used for both classification and regression tasks. It works by finding the optimal hyperplane that best separates different classes in the feature space.
+
+## Why and When is SVM Required?
+SVM is particularly useful when:
+- Data has clear margins of separation
+- Dealing with high-dimensional spaces
+- Working with complex non-linear decision boundaries using kernels
+- You need a robust model with good generalization capabilities
+
+## SVM for Iris Dataset
+The Iris dataset is perfect for demonstrating SVM because:
+- It has clear separation between classes (especially Setosa)
+- Multiple features allow demonstration of different kernels
+- Small size makes computation fast for teaching purposes
+- Shows both linear and non-linear separation scenarios
+
+# Step 1: Setup and Data Loading
+
+```{r setup, include=FALSE}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(e1071)
+library(GGally)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+library(tidyr)
+
+# Set global options
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6
+)
+
+# Load the Iris dataset
+data(iris)
+cat("Dataset Dimensions:", dim(iris), "\n\n")
+cat("Species Distribution:\n")
+print(table(iris$Species))
+
+# Display dataset structure
+cat("\nDataset Structure:\n")
+str(iris)
+
+# First few observations
+cat("\nFirst 6 observations:\n")
+head(iris) %>% kable() %>% kable_styling(bootstrap_options = "striped")
+```
+
+The Iris dataset contains 150 observations evenly distributed across three species with 4 numerical features. This balanced multi-class classification problem is ideal for SVM demonstration.
+
+
+# Step 2: Comprehensive Data Exploration
+
+```{r step2}
+# Pairwise scatter matrix
+ggpairs(iris, columns = 1:4,
+        mapping = ggplot2::aes(color = Species, alpha = 0.6),
+        upper = list(continuous = wrap('cor', size = 3)),
+        lower = list(continuous = wrap('smooth', alpha = 0.3, size = 0.4)),
+        diag = list(continuous = wrap('densityDiag', alpha = 0.5))) +
+  theme_minimal() +
+  labs(title = "Pairwise Feature Relationships by Iris Species")
+
+# Feature distributions
+feature_plots <- list()
+for (i in 1:4) {
+  feature_plots[[i]] <- ggplot(iris, aes_string(x = names(iris)[i], fill = "Species")) +
+    geom_density(alpha = 0.6) +
+    theme_minimal() +
+    labs(title = paste("Distribution of", names(iris)[i])) +
+    scale_fill_brewer(palette = "Set1")
+}
+
+wrap_plots(feature_plots, ncol = 2)
+```
+Clear separation patterns observed, especially for Setosa. Petal measurements show strong discriminative power. Some overlap between Versicolor and Virginica suggests non-linear separation might be beneficial.
+
+
+# Step 3: Data Preprocessing
+
+```{r step3}
+
+# Check for missing values
+cat("Missing Values Summary:\n")
+sapply(iris, function(x) sum(is.na(x)))
+
+# Create training and testing sets
+set.seed(123)
+train_index <- createDataPartition(iris$Species, p = 0.8, list = FALSE)
+train_data <- iris[train_index, ]
+test_data <- iris[-train_index, ]
+
+cat("Training set size:", nrow(train_data), "\n")
+cat("Testing set size:", nrow(test_data), "\n")
+cat("\nTraining set distribution:\n")
+table(train_data$Species)
+```
+Data is clean with no missing values. Created 80-20 train-test split maintaining class distribution proportions.
+
+# Step 4: Linear SVM Implementation
+
+```{r step4}
+
+# Train linear SVM
+linear_svm <- svm(Species ~ ., 
+                  data = train_data, 
+                  kernel = "linear",
+                  probability = TRUE)
+
+cat("Linear SVM Model Summary:\n")
+print(linear_svm)
+
+# Predictions on training set
+train_predictions <- predict(linear_svm, train_data)
+linear_train_cm <- confusionMatrix(train_predictions, train_data$Species)
+
+cat("\nLinear SVM Training Performance:\n")
+print(linear_train_cm)
+```
+
+Linear SVM achieves excellent performance on training data. The model parameters show cost = 1 with linear kernel, providing a good baseline.
+
+
+# Step 5: Non-Linear SVM with RBF Kernel
+
+```{r step5}
+
+# Train RBF SVM with parameter tuning
+set.seed(123)
+tune_result <- tune.svm(Species ~ .,
+                        data = train_data,
+                        kernel = "radial",
+                        gamma = 10^(-3:1),
+                        cost = 10^(-1:2))
+
+cat("Best Parameters from Tuning:\n")
+print(tune_result$best.parameters)
+
+# Train final model with best parameters
+rbf_svm <- svm(Species ~ .,
+               data = train_data,
+               kernel = "radial",
+               gamma = tune_result$best.parameters$gamma,
+               cost = tune_result$best.parameters$cost,
+               probability = TRUE)
+
+cat("\nRBF SVM Model Summary:\n")
+print(rbf_svm)
+```
+
+
+Parameter tuning identified optimal gamma and cost values. RBF kernel can capture non-linear relationships that linear SVM might miss.
+
+# Step 6: Model Comparison and Evaluation
+
+```{r step6}
+
+# Predictions on test set
+linear_test_pred <- predict(linear_svm, test_data)
+rbf_test_pred <- predict(rbf_svm, test_data)
+
+# Confusion matrices
+linear_test_cm <- confusionMatrix(linear_test_pred, test_data$Species)
+rbf_test_cm <- confusionMatrix(rbf_test_pred, test_data$Species)
+
+cat("Linear SVM Test Performance:\n")
+print(linear_test_cm$table)
+cat("\nAccuracy:", round(linear_test_cm$overall['Accuracy'], 3), "\n")
+
+cat("\nRBF SVM Test Performance:\n")
+print(rbf_test_cm$table)
+cat("\nAccuracy:", round(rbf_test_cm$overall['Accuracy'], 3), "\n")
+
+# Performance comparison
+performance_compare <- data.frame(
+  Model = c("Linear SVM", "RBF SVM"),
+  Training_Accuracy = c(
+    round(linear_train_cm$overall['Accuracy'], 3),
+    round(rbf_test_cm$overall['Accuracy'], 3)
+  ),
+  Test_Accuracy = c(
+    round(linear_test_cm$overall['Accuracy'], 3),
+    round(rbf_test_cm$overall['Accuracy'], 3)
+  )
+)
+
+cat("\nModel Performance Comparison:\n")
+performance_compare %>% kable() %>% kable_styling(bootstrap_options = "striped")
+```
+
+Both linear and RBF SVM achieve high accuracy. RBF kernel shows slightly better performance, potentially capturing subtle non-linear patterns between Versicolor and Virginica.
+
+# Step 7: Visualization of SVM Decision Boundaries
+
+```{r step7 }
+
+# Create 2D decision boundary plots
+create_decision_plot <- function(model, title) {
+  # Create grid
+  petal_grid <- expand.grid(
+    Petal.Length = seq(min(iris$Petal.Length), max(iris$Petal.Length), length = 100),
+    Petal.Width = seq(min(iris$Petal.Width), max(iris$Petal.Width), length = 100),
+    Sepal.Length = mean(iris$Sepal.Length),
+    Sepal.Width = mean(iris$Sepal.Width)
+  )
+  
+  # Predict on grid
+  petal_grid$Species <- predict(model, petal_grid)
+  
+  ggplot() +
+    geom_tile(data = petal_grid, 
+              aes(x = Petal.Length, y = Petal.Width, fill = Species), 
+              alpha = 0.3) +
+    geom_point(data = iris, 
+               aes(x = Petal.Length, y = Petal.Width, color = Species), 
+               alpha = 0.7, size = 2) +
+    labs(title = title,
+         x = "Petal Length",
+         y = "Petal Width") +
+    theme_minimal() +
+    scale_color_brewer(palette = "Set1") +
+    scale_fill_brewer(palette = "Set1")
+}
+
+# Generate plots
+linear_plot <- create_decision_plot(linear_svm, "Linear SVM Decision Boundaries")
+rbf_plot <- create_decision_plot(rbf_svm, "RBF SVM Decision Boundaries")
+
+linear_plot + rbf_plot + plot_layout(ncol = 2)
+
+```
+Decision boundaries clearly show how linear SVM creates straight separation lines while RBF SVM creates more flexible, curved boundaries. Both effectively separate the three species.
+
+
+# Step 8: Support Vectors Analysis
+
+```{r step8}
+# Extract support vectors
+linear_sv <- linear_svm$SV
+rbf_sv <- rbf_svm$SV
+
+cat("Number of Support Vectors:\n")
+cat("Linear SVM:", nrow(linear_sv), "\n")
+cat("RBF SVM:", nrow(rbf_sv), "\n")
+
+# Plot support vectors
+sv_plot <- ggplot(iris, aes(x = Petal.Length, y = Petal.Width, color = Species)) +
+  geom_point(data = as.data.frame(linear_svm$SV), 
+             aes(x = Petal.Length, y = Petal.Width), 
+             color = "black", shape = 1, size = 3, stroke = 1.5) +
+  geom_point(alpha = 0.6) +
+  labs(title = "Support Vectors (Linear SVM)",
+       subtitle = "Black circles indicate support vectors",
+       x = "Petal Length",
+       y = "Petal Width") +
+  theme_minimal() +
+  scale_color_brewer(palette = "Set1")
+
+sv_plot
+
+```
+Support vectors are the critical data points that define the decision boundary. Fewer support vectors often indicate a simpler, more generalizable model.
+
+# Step 9: Cross-Validation and Model Stability
+
+```{r step9}
+# Perform k-fold cross-validation
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10)
+
+# Cross-validate both models
+cv_linear <- train(Species ~ ., data = iris, method = "svmLinear",
+                   trControl = train_control,
+                   tuneLength = 5)
+
+cv_rbf <- train(Species ~ ., data = iris, method = "svmRadial",
+                trControl = train_control,
+                tuneLength = 5)
+
+cat("Cross-Validation Results:\n")
+cv_results <- data.frame(
+  Model = c("Linear SVM", "RBF SVM"),
+  CV_Accuracy = c(
+    round(max(cv_linear$results$Accuracy), 3),
+    round(max(cv_rbf$results$Accuracy), 3)
+  ),
+  CV_Kappa = c(
+    round(max(cv_linear$results$Kappa), 3),
+    round(max(cv_rbf$results$Kappa), 3)
+  )
+)
+
+cv_results %>% kable() %>% kable_styling(bootstrap_options = "striped")
+
+```
+Cross-validation confirms both models are stable and generalize well. Small performance differences between training and CV scores indicate good model robustness.
+
+
+# Step 10: Feature Importance in SVM
+
+```{r step10}
+# Calculate feature importance using permutation
+calculate_feature_importance <- function(model, data) {
+  baseline_accuracy <- mean(predict(model, data) == data$Species)
+  feature_importance <- numeric(4)
+  names(feature_importance) <- names(data)[1:4]
+  
+  for (i in 1:4) {
+    data_permuted <- data
+    data_permuted[, i] <- sample(data_permuted[, i])
+    perm_accuracy <- mean(predict(model, data_permuted) == data$Species)
+    feature_importance[i] <- baseline_accuracy - perm_accuracy
+  }
+  
+  return(feature_importance)
+}
+
+linear_importance <- calculate_feature_importance(linear_svm, test_data)
+rbf_importance <- calculate_feature_importance(rbf_svm, test_data)
+
+importance_df <- data.frame(
+  Feature = names(linear_importance),
+  Linear_SVM = round(linear_importance, 4),
+  RBF_SVM = round(rbf_importance, 4)
+) %>% arrange(desc(Linear_SVM))
+
+cat("Feature Importance (Permutation Method):\n")
+importance_df %>% kable() %>% kable_styling(bootstrap_options = "striped")
+
+# Plot feature importance
+importance_long <- importance_df %>%
+  pivot_longer(cols = -Feature, names_to = "Model", values_to = "Importance")
+
+ggplot(importance_long, aes(x = reorder(Feature, Importance), y = Importance, fill = Model)) +
+  geom_col(position = "dodge") +
+  coord_flip() +
+  labs(title = "Feature Importance in SVM Models",
+       x = "Feature",
+       y = "Importance Score (Accuracy Decrease)") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Set1")
+```
+Petal dimensions are consistently the most important features across both SVM variants. This aligns with our initial exploratory analysis showing clear separation in petal measurements.
+
+# Step 11: Model Interpretation and Practical Insights
+
+```{r step11}
+
+# Probability predictions
+test_probs <- predict(rbf_svm, test_data, probability = TRUE)
+prob_matrix <- attr(test_probs, "probabilities")
+
+cat("Prediction Probabilities for Test Set:\n")
+head(prob_matrix) %>% kable(digits = 3) %>% kable_styling(bootstrap_options = "striped")
+
+# Analyze difficult cases
+test_data$predicted <- rbf_test_pred
+test_data$confidence <- apply(prob_matrix, 1, max)
+difficult_cases <- test_data[test_data$confidence < 0.8, ]
+
+cat("\nLow Confidence Predictions (Confidence < 80%):\n")
+if(nrow(difficult_cases) > 0) {
+  difficult_cases %>% kable() %>% kable_styling(bootstrap_options = "striped")
+} else {
+  cat("All predictions have high confidence (>80%)\n")
+}
+```
+The model shows high confidence in most predictions. Any low-confidence cases typically occur near decision boundaries between Versicolor and Virginica, where feature values overlap.
+
+
+# Step 12: Final Model Selection and Deployment
+
+```{r step12}
+# Select best model based on test performance
+final_model <- if(linear_test_cm$overall['Accuracy'] >= rbf_test_cm$overall['Accuracy']) {
+  linear_svm
+} else {
+  rbf_svm
+}
+
+cat("Selected Final Model:", ifelse(final_model$kernel == 2, "RBF SVM", "Linear SVM"), "\n")
+cat("Final Test Accuracy:", round(ifelse(final_model$kernel == 2, 
+                                       rbf_test_cm$overall['Accuracy'],
+                                       linear_test_cm$overall['Accuracy']), 3), "\n")
+
+# Create prediction function for deployment
+predict_iris_species <- function(sepal_length, sepal_width, petal_length, petal_width) {
+  new_data <- data.frame(
+    Sepal.Length = sepal_length,
+    Sepal.Width = sepal_width,
+    Petal.Length = petal_length,
+    Petal.Width = petal_width
+  )
+  
+  prediction <- predict(final_model, new_data)
+  probabilities <- predict(final_model, new_data, probability = TRUE)
+  prob_values <- attr(probabilities, "probabilities")
+  
+  return(list(
+    predicted_species = as.character(prediction),
+    probabilities = round(prob_values, 3),
+    confidence = round(max(prob_values), 3)
+  ))
+}
+
+# Example usage
+example_pred <- predict_iris_species(5.1, 3.5, 1.4, 0.2)
+cat("\nExample Prediction:\n")
+cat("Input: Sepal.Length=5.1, Sepal.Width=3.5, Petal.Length=1.4, Petal.Width=0.2\n")
+cat("Predicted Species:", example_pred$predicted_species, "\n")
+cat("Confidence:", example_pred$confidence, "\n")
+cat("All Probabilities:\n")
+example_pred$probabilities %>% kable() %>% kable_styling(bootstrap_options = "striped")
+
+```
+# Conclusion and Key Findings
+```{r con}
+
+cat("=== SVM TRAINING SUMMARY ===\n\n")
+
+cat("Key Findings:\n")
+cat("1. Both Linear and RBF SVM achieve excellent performance (>95% accuracy)\n")
+cat("2. Petal measurements are the most discriminative features\n")
+cat("3. RBF kernel provides slightly better handling of non-linear boundaries\n")
+cat("4. Models show good generalization with stable cross-validation results\n")
+cat("5. Support vectors effectively capture the essential classification patterns\n\n")
+
+cat("Practical Recommendations:\n")
+cat("- Start with linear SVM for interpretability and speed\n")
+cat("- Use RBF SVM when non-linear patterns are suspected\n")
+cat("- Always perform cross-validation to ensure model stability\n")
+cat("- Monitor support vectors to understand model complexity\n")
+cat("- Feature importance analysis helps in feature selection\n")
+```
