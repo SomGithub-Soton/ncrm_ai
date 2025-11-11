@@ -65,7 +65,7 @@ Basic programming skills in R would be useful, but the course will still be acce
 
 This project uses datasets from the UCI Machine Learning Repository:
 
-- **Bike Sharing Dataset**:
+- **Bike Sharing Dataset**
 
 - **Maternal Health Risk Dataset**
 
