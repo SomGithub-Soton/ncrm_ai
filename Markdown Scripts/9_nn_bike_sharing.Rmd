@@ -1,0 +1,481 @@
+---
+title: "Bike Sharing Prediction: Linear Regression vs Neural Network"
+author: "Data Science Training"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df_print: paged
+    code_folding: show
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+# Bike Sharing Prediction: Linear Regression vs Neural Network
+
+## Introduction
+
+This analysis compares traditional Linear Regression with H2O Neural Network for predicting bike sharing demand using the UCI Bike Sharing Dataset.
+The dataset contains **hourly** and **daily records of bike rentals** along with **environmental** and **seasonal covariates**.  
+
+### **Key Variables**
+
+- **instant:** Record index  
+- **dteday:** Date of observation  
+- **season:** Categorical variable representing the season (**winter**, **spring**, **summer**, **fall**)  
+- **yr:** Year indicator (**0 = 2011**, **1 = 2012**)  
+- **mnth:** Month of the year  
+- **holiday:** Indicates whether the day is a **holiday**  
+- **weekday:** Day of the week  
+- **workingday:** Indicator for **non-holiday weekdays**  
+- **weathersit:** Weather situation (**clear**, **mist**, **light rain/snow**)  
+- **temp:** **Normalized temperature** in Celsius  
+- **atemp:** **Normalized “feels-like” temperature**  
+- **hum:** **Humidity** level  
+- **windspeed:** **Normalized wind speed**  
+
+### **Target and Related Variables**
+
+- **casual:** Number of **casual users**  
+- **registered:** Number of **registered users**  
+- **cnt:** **Total bike rentals**, the **main target variable** for prediction 
+
+These features combine **temporal**, **environmental**, and **behavioral** factors, making the dataset **ideal for regression tasks** such as **predicting the number of bike rentals** based on **weather** and **time-related covariates**.
+
+## Step 1: Setup and Data Loading
+
+```{r setup, message=FALSE, warning=FALSE}
+# Load required libraries
+library(h2o)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(caret)
+library(GGally)
+library(gridExtra)
+library(knitr)
+library(kableExtra)
+library(patchwork)
+
+# Load Bike Sharing Dataset from UCI
+url <- "https://archive.ics.uci.edu/ml/machine-learning-databases/00275/Bike-Sharing-Dataset.zip"
+temp <- tempfile()
+download.file(url, temp)
+unzip(temp, exdir = ".")
+day_data <- read.csv("day.csv")
+
+# Clean up
+unlink(temp)
+rm(temp)
+
+cat("Bike Sharing Dataset loaded successfully\n")
+cat("Dimensions:", dim(day_data), "\n")
+cat("Variables:", names(day_data), "\n")
+
+```
+Purpose: Load the Bike Sharing dataset and initialize necessary libraries for the analysis.
+
+Inference: Dataset successfully loaded with daily bike sharing records including weather, seasonal, and temporal features for demand prediction.
+
+## Step 2: Data Exploration and Preprocessing
+```{r }
+# Display dataset structure
+cat("Dataset Structure:\n")
+str(day_data)
+
+# Check for missing values
+cat("\nMissing Values Summary:\n")
+print(colSums(is.na(day_data)))
+
+# Summary statistics
+cat("\nSummary Statistics:\n")
+summary(day_data)
+
+# Target variable distribution
+cat("\nTarget Variable (cnt) Distribution:\n")
+summary(day_data$cnt)
+
+# Select relevant features for regression
+features_selected <- c('season', 'yr', 'mnth', 'holiday', 'weekday', 'workingday', 
+                      'weathersit', 'temp', 'atemp', 'hum', 'windspeed')
+target <- 'cnt'
+
+bike_data <- day_data[, c(features_selected, target)]
+
+# Convert categorical variables to factors
+bike_data$season <- as.factor(bike_data$season)
+bike_data$yr <- as.factor(bike_data$yr)
+bike_data$mnth <- as.factor(bike_data$mnth)
+bike_data$holiday <- as.factor(bike_data$holiday)
+bike_data$weekday <- as.factor(bike_data$weekday)
+bike_data$workingday <- as.factor(bike_data$workingday)
+bike_data$weathersit <- as.factor(bike_data$weathersit)
+
+cat("\nProcessed dataset dimensions:", dim(bike_data), "\n")
+
+# Pairwise scatter matrix for numerical variables
+numerical_vars <- c('temp', 'atemp', 'hum', 'windspeed', 'cnt')
+ggpairs(bike_data[, numerical_vars],
+        mapping = ggplot2::aes(alpha = 0.6),
+        upper = list(continuous = wrap('cor', size = 3)),
+        lower = list(continuous = wrap('smooth', alpha = 0.3, size = 0.4)),
+        diag = list(continuous = wrap('densityDiag', alpha = 0.5))) +
+  theme_minimal() +
+  labs(title = "Pairwise Relationships in Bike Sharing Data")
+
+# Target variable distribution
+p_target <- ggplot(bike_data, aes(x = cnt)) +
+  geom_histogram(fill = "steelblue", alpha = 0.7, bins = 30) +
+  labs(title = "Bike Sharing Count Distribution",
+       x = "Total Bike Count", y = "Frequency") +
+  theme_minimal()
+
+p_target
+
+```
+Purpose: Explore data distribution, relationships between variables, and understand the target variable for regression analysis.
+
+Inference: The bike count shows a relatively normal distribution with some right skew. Strong correlations exist between temperature-related features and bike demand.
+
+## Step 3: Data Preparation
+```{r }
+# Split data into train and test sets
+set.seed(123)
+train_index <- createDataPartition(bike_data$cnt, p = 0.8, list = FALSE)
+train_data <- bike_data[train_index, ]
+test_data <- bike_data[-train_index, ]
+
+cat("Data split completed:\n")
+cat("Training set:", nrow(train_data), "rows\n")
+cat("Test set:", nrow(test_data), "rows\n")
+
+# Check target variable distribution in splits
+cat("\nTarget variable summary in training set:\n")
+summary(train_data$cnt)
+cat("\nTarget variable summary in test set:\n")
+summary(test_data$cnt)
+
+```
+Purpose: Prepare data for modeling with proper train-test splits to ensure reliable model evaluation.
+
+Inference: Data successfully split with similar target variable distribution in both training and test sets, ensuring fair model comparison.
+
+## Step 4: Linear Regression Model
+```{r }
+# Train linear regression model
+lm_model <- lm(cnt ~ ., data = train_data)
+
+# Model summary
+cat("Linear Regression Model Summary:\n")
+print(summary(lm_model))
+
+# Make predictions on test set
+lm_predictions <- predict(lm_model, newdata = test_data)
+
+# Calculate performance metrics
+lm_rmse <- sqrt(mean((test_data$cnt - lm_predictions)^2))
+lm_mae <- mean(abs(test_data$cnt - lm_predictions))
+lm_r2 <- 1 - (sum((test_data$cnt - lm_predictions)^2) / 
+               sum((test_data$cnt - mean(test_data$cnt))^2))
+
+cat("\nLinear Regression Performance on Test Set:\n")
+cat("RMSE:", round(lm_rmse, 2), "\n")
+cat("MAE:", round(lm_mae, 2), "\n")
+cat("R-squared:", round(lm_r2, 4), "\n")
+
+# Create results dataframe for visualization
+results_df <- data.frame(
+  Actual = test_data$cnt,
+  Linear_Regression = lm_predictions
+)
+
+# Plot actual vs predicted values
+p_lm_fit <- ggplot(results_df, aes(x = Actual, y = Linear_Regression)) +
+  geom_point(alpha = 0.6, color = "steelblue") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Linear Regression: Actual vs Predicted",
+       subtitle = paste("RMSE:", round(lm_rmse, 2), "R²:", round(lm_r2, 4)),
+       x = "Actual Bike Count", y = "Predicted Bike Count") +
+  theme_minimal()
+
+# Residual plot
+results_df$lm_residuals <- test_data$cnt - lm_predictions
+p_lm_residuals <- ggplot(results_df, aes(x = Linear_Regression, y = lm_residuals)) +
+  geom_point(alpha = 0.6, color = "darkorange") +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Linear Regression: Residuals vs Predicted",
+       x = "Predicted Bike Count", y = "Residuals") +
+  theme_minimal()
+
+grid.arrange(p_lm_fit, p_lm_residuals, ncol = 2)
+
+
+```
+Purpose: Implement and evaluate traditional Linear Regression as a baseline model for bike sharing prediction.
+
+Inference: Linear Regression provides a reasonable baseline with interpretable coefficients, showing how different features affect bike sharing demand.
+
+## Step 5: H2O Neural Network Setup
+```{r }
+# Initialize H2O cluster
+h2o.init(nthreads = -1, max_mem_size = "2G")
+
+# Convert data to H2O frames
+train_h2o <- as.h2o(train_data)
+test_h2o <- as.h2o(test_data)
+
+# Define features and target for H2O
+features_h2o <- setdiff(names(train_data), target)
+
+cat("H2O setup completed:\n")
+cat("Features:", features_h2o, "\n")
+cat("Target:", target, "\n")
+
+```
+Purpose: Initialize H2O environment and prepare data for neural network training.
+
+Inference: H2O cluster successfully initialized with proper data conversion for neural network modeling.
+
+## Step 6: Simple Neural Network Model
+```{r }
+# Train a simple neural network
+nn_model <- h2o.deeplearning(
+  x = features_h2o,
+  y = target,
+  training_frame = train_h2o,
+  model_id = "bike_nn_simple",
+  hidden = c(10, 5),  # Very simple architecture
+  epochs = 50,
+  activation = "Rectifier",
+  stopping_rounds = 5,
+  stopping_tolerance = 0.01,
+  stopping_metric = "RMSE",
+  seed = 123
+)
+
+# Model summary
+cat("Neural Network Model Summary:\n")
+print(nn_model)
+
+# Make predictions
+nn_predictions <- h2o.predict(nn_model, test_h2o)
+nn_pred_df <- as.data.frame(nn_predictions)
+
+# Calculate performance metrics
+nn_rmse <- sqrt(mean((test_data$cnt - nn_pred_df$predict)^2))
+nn_mae <- mean(abs(test_data$cnt - nn_pred_df$predict))
+nn_r2 <- 1 - (sum((test_data$cnt - nn_pred_df$predict)^2) / 
+               sum((test_data$cnt - mean(test_data$cnt))^2))
+
+cat("\nNeural Network Performance on Test Set:\n")
+cat("RMSE:", round(nn_rmse, 2), "\n")
+cat("MAE:", round(nn_mae, 2), "\n")
+cat("R-squared:", round(nn_r2, 4), "\n")
+
+# Add neural network predictions to results
+results_df$Neural_Network <- nn_pred_df$predict
+
+# Plot actual vs predicted for neural network
+p_nn_fit <- ggplot(results_df, aes(x = Actual, y = Neural_Network)) +
+  geom_point(alpha = 0.6, color = "darkgreen") +
+  geom_abline(intercept = 0, slope = 1, color = "red", linetype = "dashed") +
+  labs(title = "Neural Network: Actual vs Predicted",
+       subtitle = paste("RMSE:", round(nn_rmse, 2), "R²:", round(nn_r2, 4)),
+       x = "Actual Bike Count", y = "Predicted Bike Count") +
+  theme_minimal()
+
+# Residual plot for neural network
+results_df$nn_residuals <- test_data$cnt - nn_pred_df$predict
+p_nn_residuals <- ggplot(results_df, aes(x = Neural_Network, y = nn_residuals)) +
+  geom_point(alpha = 0.6, color = "purple") +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Neural Network: Residuals vs Predicted",
+       x = "Predicted Bike Count", y = "Residuals") +
+  theme_minimal()
+
+grid.arrange(p_nn_fit, p_nn_residuals, ncol = 2)
+
+```
+Purpose: Train and evaluate a simple neural network using H2O for comparison with linear regression.
+
+Inference: The neural network captures non-linear patterns in the data, potentially offering improved predictions over linear regression.
+
+## Step 7: Model Comparison
+
+```{r }
+# Create comprehensive comparison
+performance_comparison <- data.frame(
+  Model = c("Linear Regression", "Neural Network"),
+  RMSE = c(lm_rmse, nn_rmse),
+  MAE = c(lm_mae, nn_mae),
+  R_squared = c(lm_r2, nn_r2)
+)
+
+cat("Model Performance Comparison:\n")
+print(performance_comparison)
+
+# Visualization: Performance metrics comparison
+metrics_long <- performance_comparison %>%
+  pivot_longer(cols = -Model, names_to = "Metric", values_to = "Value")
+
+p_metrics <- ggplot(metrics_long, aes(x = Model, y = Value, fill = Model)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  facet_wrap(~Metric, scales = "free_y") +
+  labs(title = "Model Performance Metrics Comparison",
+       y = "Metric Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Visualization: Side-by-side predictions
+comparison_long <- results_df %>%
+  select(Actual, Linear_Regression, Neural_Network) %>%
+  pivot_longer(cols = -Actual, names_to = "Model", values_to = "Predicted")
+
+p_side_by_side <- ggplot(comparison_long, aes(x = Actual, y = Predicted, color = Model)) +
+  geom_point(alpha = 0.5) +
+  geom_abline(intercept = 0, slope = 1, color = "black", linetype = "dashed") +
+  labs(title = "Side-by-Side Prediction Comparison",
+       x = "Actual Bike Count", y = "Predicted Bike Count") +
+  theme_minimal() +
+  scale_color_manual(values = c("Linear_Regression" = "#F8766D", 
+                               "Neural_Network" = "#88E1E3"))
+
+# Visualization: Residuals comparison
+residuals_long <- results_df %>%
+  select(Linear_Regression, Neural_Network, lm_residuals, nn_residuals) %>%
+  pivot_longer(cols = c(lm_residuals, nn_residuals), 
+               names_to = "Model", values_to = "Residuals") %>%
+  mutate(Predicted = ifelse(Model == "lm_residuals", Linear_Regression, Neural_Network),
+         Model = ifelse(Model == "lm_residuals", "Linear Regression", "Neural Network"))
+
+p_residuals_compare <- ggplot(residuals_long, aes(x = Predicted, y = Residuals, color = Model)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals Comparison",
+       x = "Predicted Bike Count", y = "Residuals") +
+  theme_minimal() +
+  scale_color_manual(values = c("Linear Regression" = "#F8766D", 
+                               "Neural Network" = "#88E1E3"))
+
+# Display all comparison plots
+# grid.arrange(p_metrics, p_side_by_side, p_residuals_compare, ncol = 1)
+
+p_metrics / p_side_by_side / p_residuals_compare
+
+```
+
+
+Purpose: Comprehensive comparison of both models across multiple metrics and visualizations.
+
+Inference: Direct comparison reveals the strengths and weaknesses of each approach, helping students understand when each method might be preferable.
+
+## Step 8: Prediction Analysis and Insights
+```{r }
+# Analyze prediction errors
+results_df$abs_error_lm <- abs(results_df$lm_residuals)
+results_df$abs_error_nn <- abs(results_df$nn_residuals)
+
+# Error distribution by actual value
+p_error_dist <- ggplot(results_df) +
+  geom_point(aes(x = Actual, y = abs_error_lm, color = "Linear Regression"), alpha = 0.6) +
+  geom_point(aes(x = Actual, y = abs_error_nn, color = "Neural Network"), alpha = 0.6) +
+  labs(title = "Absolute Error Distribution by Actual Value",
+       x = "Actual Bike Count", y = "Absolute Error") +
+  theme_minimal() +
+  scale_color_manual(name = "Model", 
+                     values = c("Linear Regression" = "#F8766D", 
+                               "Neural Network" = "#88E1E3"))
+
+# Best and worst predictions analysis
+results_df$combined_rank <- rank(rowMeans(cbind(rank(results_df$abs_error_lm), 
+                                               rank(results_df$abs_error_nn))))
+
+best_predictions <- head(results_df[order(results_df$combined_rank), ], 10)
+worst_predictions <- head(results_df[order(-results_df$combined_rank), ], 10)
+
+cat("\nBest Predictions (Lowest Combined Error):\n")
+print(best_predictions[, c("Actual", "Linear_Regression", "Neural_Network", 
+                          "abs_error_lm", "abs_error_nn")])
+
+cat("\nWorst Predictions (Highest Combined Error):\n")
+print(worst_predictions[, c("Actual", "Linear_Regression", "Neural_Network", 
+                           "abs_error_lm", "abs_error_nn")])
+
+# Performance improvement analysis
+improvement_df <- data.frame(
+  Scenario = c("RMSE Improvement", "MAE Improvement", "R² Improvement"),
+  Linear_Regression = c(lm_rmse, lm_mae, lm_r2),
+  Neural_Network = c(nn_rmse, nn_mae, nn_r2),
+  Improvement = c(
+    round((lm_rmse - nn_rmse) / lm_rmse * 100, 2),
+    round((lm_mae - nn_mae) / lm_mae * 100, 2),
+    round((nn_r2 - lm_r2) / lm_r2 * 100, 2)
+  )
+)
+
+cat("\nPerformance Improvement Analysis (%):\n")
+print(improvement_df)
+
+p_improvement <- ggplot(improvement_df, aes(x = Scenario, y = Improvement, fill = Scenario)) +
+  geom_bar(stat = "identity", alpha = 0.8) +
+  labs(title = "Neural Network Performance Improvement Over Linear Regression",
+       y = "Improvement (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_error_dist / p_improvement
+
+```
+
+Purpose: Deep dive into prediction patterns and model performance characteristics.
+
+Inference: Analysis reveals specific scenarios where each model excels or struggles, providing practical insights for model selection.
+
+## Step 9: Final Conclusions and Recommendations
+```{r }
+cat("=== FINAL MODEL COMPARISON AND RECOMMENDATIONS ===\n\n")
+
+cat("LINEAR REGRESSION RESULTS:\n")
+cat("- RMSE:", round(lm_rmse, 2), "\n")
+cat("- MAE:", round(lm_mae, 2), "\n")
+cat("- R-squared:", round(lm_r2, 4), "\n")
+cat("- Strengths: Highly interpretable, fast training, good baseline\n")
+cat("- Weaknesses: Limited to linear relationships, may miss complex patterns\n\n")
+
+cat("NEURAL NETWORK RESULTS:\n")
+cat("- RMSE:", round(nn_rmse, 2), "\n")
+cat("- MAE:", round(nn_mae, 2), "\n")
+cat("- R-squared:", round(nn_r2, 4), "\n")
+cat("- Strengths: Captures non-linear patterns, flexible architecture\n")
+cat("- Weaknesses: Less interpretable, longer training time, hyperparameter sensitive\n\n")
+
+cat("PERFORMANCE COMPARISON:\n")
+if(nn_rmse < lm_rmse) {
+  improvement <- round((lm_rmse - nn_rmse) / lm_rmse * 100, 1)
+  cat("- Neural Network shows", improvement, "% lower RMSE\n")
+} else {
+  improvement <- round((nn_rmse - lm_rmse) / nn_rmse * 100, 1)
+  cat("- Linear Regression shows", improvement, "% lower RMSE\n")
+}
+
+cat("- R-squared difference:", round(abs(nn_r2 - lm_r2), 4), "\n\n")
+
+cat("RECOMMENDATIONS FOR STUDENTS:\n")
+cat("1. Start with Linear Regression as a baseline for any regression problem\n")
+cat("2. Use Neural Networks when you suspect complex non-linear relationships\n")
+cat("3. Consider interpretability requirements when choosing between models\n")
+cat("4. Always validate both simple and complex models on holdout data\n")
+cat("5. Neural networks often work better with larger datasets and more features\n")
+
+# Save models for future use
+model_path_nn <- h2o.saveModel(nn_model, path = getwd(), force = TRUE)
+cat("\nNeural Network model saved to:", model_path_nn, "\n")
+
+# Shutdown H2O cluster
+h2o.shutdown(prompt = FALSE)
+
+
+```

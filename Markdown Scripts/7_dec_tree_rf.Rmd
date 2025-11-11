@@ -1,0 +1,618 @@
+---
+title: "Decision Tree vs Random Forest: Comprehensive Comparison"
+author: "Data Science Training"
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    df_print: paged
+    code_folding: show
+  pdf_document:
+    toc: true
+    number_sections: true
+---
+
+
+
+# Introduction to Decision Trees and Random Forests
+## What are Decision Trees?
+Decision Trees are supervised learning algorithms that make predictions by learning simple decision rules inferred from data features. Think of it as playing "20 Questions" — each node in the tree asks a question about a feature, and based on the answer, you follow the appropriate branch until you reach a prediction.
+
+**Real-world example: A bank deciding whether to approve a loan:**
+
+- Is income > $50,000?  
+  - Yes: Is credit score > 700?  
+    - Yes: Approve loan  
+    - No: Reject loan  
+  - No: Reject loan  
+
+## What are Random Forests?
+Random Forest is an ensemble method that combines multiple decision trees to create a more robust and accurate model. It uses two key techniques: bagging (bootstrap aggregating) and feature randomness. Instead of relying on a single tree, it builds many trees and combines their predictions.
+
+**Real-world example: Medical diagnosis by a team of doctors:**
+
+- Each specialist (tree) examines different aspects (features)  
+- They may look at different patient data (feature randomness)  
+- Each gives their diagnosis  
+- Final diagnosis is based on majority vote 
+
+Random Forests are typically more accurate and robust than a single Decision Tree but at the cost of reduced interpretability and higher computational demand.
+
+## Why Compare Both Methods on the Same Dataset?
+This comparison demonstrates key machine learning concepts:
+
+- **Bias-Variance Tradeoff**: Single trees have high variance, forests reduce it  
+- **Ensemble Learning**: Combining weak learners creates strong learners  
+- **Overfitting**: Trees often overfit, forests generalize better  
+- **Feature Importance**: Both methods provide interpretable feature rankings  
+- **Computational Complexity**: Trade-off between simplicity and performance  
+
+The choice between them depends on project requirements: use Decision Trees when explainability is crucial and relationships are simple, and Random Forest when maximum accuracy and robustness are needed for complex patterns. Both methods provide valuable feature importance insights that can inform domain understanding and feature engineering.
+
+
+# Step 1: Setup and Data Loading
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(randomForest)
+library(rpart)
+library(rpart.plot)
+library(GGally)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+library(tidyr)
+library(pROC)
+
+# Load the Heart Disease dataset
+url <- "https://raw.githubusercontent.com/sharmaroshan/Heart-UCI-Dataset/master/heart.csv"
+heart <- read.csv(url)
+
+cat("Dataset Dimensions:", dim(heart), "\n\n")
+cat("Target Variable Distribution:\n")
+print(table(heart$target))
+
+# Display dataset structure
+cat("\nDataset Structure:\n")
+str(heart)
+
+# First few observations
+cat("\nFirst 6 observations:\n")
+head(heart) %>% kable() %>% kable_styling(bootstrap_options = "striped")
+```
+
+Purpose: This block loads the heart disease dataset and provides initial exploration. We're using a real medical dataset to make our comparison more meaningful and practical.
+
+
+Inference: The dataset contains 303 observations with 14 features including clinical parameters. The target variable is balanced (165 with heart disease, 138 without), making it suitable for binary classification without needing extensive class balancing.
+
+
+
+# Step 2: Comprehensive Data Exploration
+```{r exp, warning=FALSE}
+# Basic statistics summary
+cat("Summary Statistics:\n")
+summary(heart) %>% kable() %>% kable_styling(bootstrap_options = "striped")
+
+# Correlation heatmap
+numeric_vars <- heart %>% select(where(is.numeric))
+cor_matrix <- cor(numeric_vars)
+
+cor_df <- as.data.frame(as.table(cor_matrix))
+names(cor_df) <- c("Var1", "Var2", "Correlation")
+
+ggplot(cor_df, aes(Var1, Var2, fill = Correlation)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", 
+                       midpoint = 0, limit = c(-1,1), space = "Lab", 
+                       name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Feature Correlation Heatmap",
+       x = "", y = "") +
+  geom_text(aes(label = round(Correlation, 2)), color = "black", size = 3)
+
+# Target distribution by key features
+p1 <- ggplot(heart, aes(x = factor(target), y = age, fill = factor(target))) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Age Distribution by Heart Disease Status",
+       x = "Heart Disease (0=No, 1=Yes)", y = "Age") +
+  theme_minimal()
+
+p2 <- ggplot(heart, aes(x = factor(target), y = chol, fill = factor(target))) +
+  geom_boxplot(alpha = 0.7) +
+  labs(title = "Cholesterol Distribution by Heart Disease Status",
+       x = "Heart Disease (0=No, 1=Yes)", y = "Cholesterol") +
+  theme_minimal()
+
+p3 <- ggplot(heart, aes(x = factor(sex), fill = factor(target))) +
+  geom_bar(position = "fill") +
+  labs(title = "Heart Disease Prevalence by Gender",
+       x = "Sex (0=Female, 1=Male)", y = "Proportion") +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme_minimal()
+
+p4 <- ggplot(heart, aes(x = factor(cp), fill = factor(target))) +
+  geom_bar(position = "fill") +
+  labs(title = "Heart Disease by Chest Pain Type",
+       x = "Chest Pain Type", y = "Proportion") +
+  scale_fill_discrete(name = "Heart Disease") +
+  theme_minimal()
+
+(p1 + p2) / (p3 + p4)
+
+# Pairwise scatter matrix for Heart Disease dataset
+ggpairs(heart, columns = c("age", "trestbps", "chol", "thalach", "oldpeak"),
+        mapping = ggplot2::aes(color = factor(target), alpha = 0.6),
+        upper = list(continuous = wrap('cor', size = 3)),
+        lower = list(continuous = wrap('smooth', alpha = 0.3, size = 0.4)),
+        diag = list(continuous = wrap('densityDiag', alpha = 0.5))) +
+  theme_minimal() +
+  labs(title = "Pairwise Feature Relationships by Heart Disease Status",
+       subtitle = "Target: 0 = No Heart Disease, 1 = Heart Disease") +
+  scale_color_manual(name = "Heart Disease", 
+                     values = c("0" = "#F8766D", "1" = "#00BFC4"),
+                     labels = c("No Disease", "Disease"))
+
+```
+
+
+Purpose: Understanding data distribution, correlations, and relationships between features and target variable. This helps us understand which features might be important predictors.
+
+Inference:
+
+- Age shows some separation between groups, but not extremely distinct
+
+- Cholesterol levels show similar distributions across groups
+
+- Gender shows clear patterns - males have higher heart disease prevalence
+
+- Chest pain type is strongly correlated with heart disease presence
+
+- The correlation matrix reveals complex relationships between clinical features
+
+
+# Step 3: Data Preprocessing and Train-Test Split
+```{r}
+# Check for missing values
+cat("Missing Values Summary:\n")
+missing_summary <- sapply(heart, function(x) sum(is.na(x)))
+print(missing_summary)
+
+# Convert appropriate variables to factors
+heart_processed <- heart %>%
+  mutate(
+    sex = as.factor(sex),
+    cp = as.factor(cp),
+    fbs = as.factor(fbs),
+    restecg = as.factor(restecg),
+    exang = as.factor(exang),
+    slope = as.factor(slope),
+    ca = as.factor(ca),
+    thal = as.factor(thal),
+    target = as.factor(target)
+  )
+
+# Create training and testing sets
+set.seed(123)
+train_index <- createDataPartition(heart_processed$target, p = 0.8, list = FALSE)
+train_data <- heart_processed[train_index, ]
+test_data <- heart_processed[-train_index, ]
+
+cat("Training set size:", nrow(train_data), "\n")
+cat("Testing set size:", nrow(test_data), "\n")
+cat("\nTraining set distribution:\n")
+print(table(train_data$target))
+cat("\nTesting set distribution:\n")
+print(table(test_data$target))
+```
+
+
+Purpose: Prepare data for modeling by handling categorical variables and creating proper train-test splits to evaluate model performance on unseen data.
+
+Inference:
+
+- No missing values in the dataset
+
+- Successfully converted categorical variables to factors
+
+- Created 80-20 train-test split maintaining similar class distribution
+
+- Training set: 242 observations, Testing set: 61 observations
+
+- Both sets have balanced class distribution for reliable evaluation
+
+
+# Step 4: Decision Tree Implementation
+```{r}
+# Train Decision Tree with cross-validation
+set.seed(123)
+dt_control <- trainControl(
+  method = "cv",  # "repeatedcv", "boot"
+  number = 10,
+  # repeats = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+  # savePredictions = TRUE
+)
+
+# Convert target to factor with proper names for caret
+train_data_caret <- train_data %>%
+  mutate(target = ifelse(target == 1, "Disease", "NoDisease") %>% as.factor())
+test_data_caret <- test_data %>%
+  mutate(target = ifelse(target == 1, "Disease", "NoDisease") %>% as.factor())
+
+# Train Decision Tree
+dt_model <- train(
+  target ~ .,
+  data = train_data_caret,
+  method = "rpart",  # "C5.0",  "ctree", "tree",
+  trControl = dt_control,
+  tuneLength = 10,
+  metric = "ROC"
+)
+
+# Make predictions
+dt_pred <- predict(dt_model, test_data_caret)
+dt_prob <- predict(dt_model, test_data_caret, type = "prob")[, "Disease"]
+
+# Evaluate performance
+dt_cm <- confusionMatrix(dt_pred, test_data_caret$target, positive = "Disease")
+dt_accuracy <- dt_cm$overall["Accuracy"]
+dt_sensitivity <- dt_cm$byClass["Sensitivity"]
+dt_specificity <- dt_cm$byClass["Specificity"]
+
+cat("Decision Tree Performance:\n")
+print(dt_cm)
+
+# Plot the decision tree
+rpart.plot(dt_model$finalModel, 
+           main = "Decision Tree for Heart Disease Prediction",
+           box.palette = "RdYlGn",
+           shadow.col = "gray",
+           nn = TRUE)
+
+# Feature importance from decision tree
+dt_importance <- varImp(dt_model)$importance
+dt_importance$Feature <- rownames(dt_importance)
+dt_importance <- dt_importance[order(-dt_importance$Overall), ]
+
+ggplot(dt_importance, aes(x = reorder(Feature, Overall), y = Overall)) +
+  geom_col(fill = "steelblue", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Decision Tree - Feature Importance",
+       x = "Features", y = "Importance Score") +
+  theme_minimal()
+```
+
+
+Purpose: Implement and evaluate a single Decision Tree model. This gives us a baseline understanding of how a simple, interpretable model performs on our data.
+
+Inference:
+
+- The decision tree identifies key splitting features for heart disease prediction
+
+- Feature importance shows which variables the tree considers most predictive
+
+- The tree structure provides complete interpretability - we can trace every decision
+
+- Performance metrics give us a baseline for comparison with Random Forest
+
+
+# Step 5: Random Forest Implementation
+```{r}
+
+# Train Random Forest with cross-validation
+set.seed(123)
+rf_control <- trainControl(
+  method = "cv",
+  number = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+
+# Train Random Forest
+rf_model <- train(
+  target ~ .,
+  data = train_data_caret,
+  method = "rf",
+  trControl = rf_control,
+  tuneLength = 5,
+  metric = "ROC",
+  ntree = 500,
+  importance = TRUE
+)
+
+# Make predictions
+rf_pred <- predict(rf_model, test_data_caret)
+rf_prob <- predict(rf_model, test_data_caret, type = "prob")[, "Disease"]
+
+# Evaluate performance
+rf_cm <- confusionMatrix(rf_pred, test_data_caret$target, positive = "Disease")
+rf_accuracy <- rf_cm$overall["Accuracy"]
+rf_sensitivity <- rf_cm$byClass["Sensitivity"]
+rf_specificity <- rf_cm$byClass["Specificity"]
+
+cat("Random Forest Performance:\n")
+print(rf_cm)
+
+# Plot Random Forest error rate
+rf_final <- rf_model$finalModel
+plot(rf_final, main = "Random Forest Error Rate")
+legend("topright", 
+       legend = colnames(rf_final$err.rate), 
+       col = 1:ncol(rf_final$err.rate), 
+       lty = 1, 
+       cex = 0.8)
+
+# FIXED: More robust feature importance extraction
+# Method 1: Direct from randomForest object
+rf_importance <- as.data.frame(rf_final$importance)
+rf_importance$Feature <- rownames(rf_importance)
+
+# Use MeanDecreaseGini for importance (most common for classification)
+if("MeanDecreaseGini" %in% colnames(rf_importance)) {
+  rf_importance$Importance_Score <- rf_importance$MeanDecreaseGini
+} else {
+  # If MeanDecreaseGini doesn't exist, use the first numeric column
+  numeric_cols <- sapply(rf_importance, is.numeric)
+  if(any(numeric_cols)) {
+    rf_importance$Importance_Score <- rf_importance[, which(numeric_cols)[1]]
+  } else {
+    stop("No numeric importance scores found")
+  }
+}
+
+# Order by importance
+rf_importance <- rf_importance[order(-rf_importance$Importance_Score), ]
+
+# Create the plot
+ggplot(rf_importance, aes(x = reorder(Feature, Importance_Score), y = Importance_Score)) +
+  geom_col(fill = "darkgreen", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Random Forest - Feature Importance",
+       x = "Features", y = "Importance Score") +
+  theme_minimal()
+
+# Print the importance scores
+cat("\nRandom Forest Feature Importance:\n")
+print(rf_importance[, c("Feature", "Importance_Score")])
+```
+
+
+Purpose: Implement Random Forest to see how an ensemble method improves upon the single Decision Tree through bagging and feature randomness.
+
+Inference:
+
+- Random Forest typically shows more stable feature importance rankings
+
+- The error rate plot shows how the model converges as more trees are added
+
+- We can observe if the ensemble approach provides better generalization
+
+- The feature importance might differ from the single tree due to ensemble averaging
+
+
+# Step 6: Comprehensive Model Comparison
+```{r}
+# Create performance comparison
+performance_comparison <- data.frame(
+  Model = c("Decision Tree", "Random Forest"),
+  Accuracy = c(dt_accuracy, rf_accuracy),
+  Sensitivity = c(dt_sensitivity, rf_sensitivity),
+  Specificity = c(dt_specificity, rf_specificity),
+  AUC = c(auc(roc(test_data_caret$target, dt_prob)), 
+          auc(roc(test_data_caret$target, rf_prob)))
+)
+
+cat("Performance Comparison:\n")
+performance_comparison %>% kable(digits = 4) %>% kable_styling()
+
+# Visualization of performance metrics
+comparison_long <- performance_comparison %>%
+  pivot_longer(cols = -Model, names_to = "Metric", values_to = "Value")
+
+ggplot(comparison_long, aes(x = Metric, y = Value, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  labs(title = "Model Performance Comparison",
+       x = "Performance Metrics", y = "Score") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Decision Tree" = "steelblue", 
+                              "Random Forest" = "darkgreen"))
+
+# ROC Curve comparison
+dt_roc <- roc(test_data_caret$target, dt_prob)
+rf_roc <- roc(test_data_caret$target, rf_prob)
+
+plot(dt_roc, col = "blue", main = "ROC Curve Comparison")
+lines(rf_roc, col = "green")
+legend("bottomright", 
+       legend = c(paste("Decision Tree (AUC =", round(auc(dt_roc), 3), ")"),
+                 paste("Random Forest (AUC =", round(auc(rf_roc), 3), ")")),
+       col = c("blue", "green"), lwd = 2)
+
+# FIXED: Feature importance comparison
+# First, ensure both importance dataframes have consistent structure
+dt_importance_clean <- dt_importance %>%
+  select(Feature, DT_Importance = Overall) %>%
+  mutate(DT_Importance = as.numeric(DT_Importance))
+
+rf_importance_clean <- rf_importance %>%
+  select(Feature, RF_Importance = Importance_Score) %>%
+  mutate(RF_Importance = as.numeric(RF_Importance))
+
+# Merge the importance data
+importance_comparison <- merge(dt_importance_clean, rf_importance_clean, 
+                              by = "Feature", all = TRUE)
+
+# Convert to long format for plotting
+importance_long <- importance_comparison %>%
+  pivot_longer(cols = c(DT_Importance, RF_Importance), 
+               names_to = "Model", 
+               values_to = "Importance") %>%
+  mutate(Model = ifelse(Model == "DT_Importance", "Decision Tree", "Random Forest"))
+
+# Plot feature importance comparison
+ggplot(importance_long, aes(x = reorder(Feature, Importance), y = Importance, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  coord_flip() +
+  labs(title = "Feature Importance Comparison",
+       x = "Features", y = "Importance Score") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Decision Tree" = "steelblue", 
+                              "Random Forest" = "darkgreen"))
+
+# Print top features from each model
+cat("\nTop 5 Features - Decision Tree:\n")
+print(head(dt_importance_clean[order(-dt_importance_clean$DT_Importance), ], 5))
+
+cat("\nTop 5 Features - Random Forest:\n")
+print(head(rf_importance_clean[order(-rf_importance_clean$RF_Importance), ], 5))
+```
+
+
+Purpose: Directly compare both models across multiple metrics to understand their relative strengths and weaknesses on this specific dataset.
+
+Inference:
+
+- We can see which model performs better on accuracy, sensitivity, specificity
+
+- AUC comparison shows which model has better overall discriminative power
+
+- Feature importance comparison reveals if both models agree on important predictors
+
+- The trade-off between interpretability (DT) and performance (RF) becomes clear
+
+
+
+# Step 7: Statistical Significance Testing
+```{r}
+# Cross-validation for statistical comparison
+set.seed(123)
+cv_control <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = TRUE
+)
+
+# Train both models with repeated CV
+dt_cv <- train(
+  target ~ .,
+  data = train_data_caret,
+  method = "rpart",
+  trControl = cv_control,
+  tuneLength = 5,
+  metric = "ROC"
+)
+
+rf_cv <- train(
+  target ~ .,
+  data = train_data_caret,
+  method = "rf",
+  trControl = cv_control,
+  tuneLength = 3,
+  metric = "ROC",
+  ntree = 500
+)
+
+# Compare model performance statistically
+cv_comparison <- resamples(list(
+  "Decision Tree" = dt_cv,
+  "Random Forest" = rf_cv
+))
+
+cat("Cross-Validation Performance Summary:\n")
+summary(cv_comparison)
+
+# Visualization of CV results
+bwplot(cv_comparison, main = "Cross-Validation Performance Comparison")
+
+# Statistical significance test
+cv_diff <- diff(cv_comparison)
+cat("\nStatistical Significance of Differences:\n")
+summary(cv_diff)
+```
+
+Purpose: Determine if the performance differences between models are statistically significant using rigorous cross-validation and hypothesis testing.
+
+Inference:
+
+- Repeated cross-validation provides more reliable performance estimates
+
+- We can see if Random Forest's potential performance gains are statistically significant
+
+- The results help us make data-driven decisions about model selection
+
+- Understanding variance in performance across folds informs about model stability
+
+
+# Step 8: Final Conclusions and Recommendations
+```{r}
+# Final model selection and insights
+cat("=== FINAL COMPARISON AND RECOMMENDATIONS ===\n\n")
+
+cat("1. PERFORMANCE SUMMARY:\n")
+cat("   Decision Tree - Accuracy:", round(dt_accuracy, 3), 
+    "AUC:", round(auc(dt_roc), 3), "\n")
+cat("   Random Forest - Accuracy:", round(rf_accuracy, 3), 
+    "AUC:", round(auc(rf_roc), 3), "\n\n")
+
+cat("2. KEY DIFFERENCES OBSERVED:\n")
+cat("   - Interpretability: Decision Tree wins (fully transparent)\n")
+cat("   - Performance: Random Forest typically better (ensemble advantage)\n")
+cat("   - Stability: Random Forest more robust to noise\n")
+cat("   - Training time: Decision Tree faster\n")
+cat("   - Feature importance: Both provide insights, RF more reliable\n\n")
+
+cat("3. WHEN TO CHOOSE EACH MODEL:\n")
+cat("   Choose Decision Tree when:\n")
+cat("   * Interpretability is crucial (medical, legal domains)\n")
+cat("   * Computational resources are limited\n")
+cat("   * Need quick baseline model\n")
+cat("   * Data relationships are relatively simple\n\n")
+
+cat("   Choose Random Forest when:\n")
+cat("   * Maximum accuracy is required\n")
+cat("   * Dealing with complex feature interactions\n")
+cat("   * Data has noise or missing patterns\n")
+cat("   * Reliable feature importance is needed\n")
+cat("   * Model stability is important\n\n")
+
+cat("4. HEART DISEASE SPECIFIC INSIGHTS:\n")
+# Top features from both models
+top_features_dt <- head(dt_importance$Feature, 3)
+top_features_rf <- head(rf_importance$Feature, 3)
+
+cat("   Decision Tree top features:", paste(top_features_dt, collapse = ", "), "\n")
+cat("   Random Forest top features:", paste(top_features_rf, collapse = ", "), "\n")
+cat("   Common important features suggest robust clinical indicators\n")
+
+# Final visualization: Model strengths
+strengths_df <- data.frame(
+  Aspect = rep(c("Interpretability", "Accuracy", "Speed", "Robustness"), 2),
+  Score = c(9, 6, 9, 5, 3, 9, 4, 9),  # Scores 1-10
+  Model = rep(c("Decision Tree", "Random Forest"), each = 4)
+)
+
+ggplot(strengths_df, aes(x = Aspect, y = Score, fill = Model)) +
+  geom_bar(stat = "identity", position = "dodge", alpha = 0.8) +
+  labs(title = "Model Strengths Comparison",
+       x = "Performance Aspect", y = "Relative Score (1-10)") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Decision Tree" = "steelblue", 
+                              "Random Forest" = "darkgreen")) +
+  ylim(0, 10)
+```
+
+
+
+
+
+
