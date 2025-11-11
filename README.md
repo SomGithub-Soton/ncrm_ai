@@ -65,17 +65,13 @@ Basic programming skills in R would be useful, but the course will still be acce
 
 This project uses datasets from the UCI Machine Learning Repository:
 
-- **Bike Sharing Dataset**: Fanaee-T, H., & Gama, J. (2014). *Bike Sharing Dataset*. 
-  UCI Machine Learning Repository. https://doi.org/10.24432/C5W894
+- **Bike Sharing Dataset**:
 
-- **Maternal Health Risk Dataset**: Ahmed, M. R., Islam, M. T., & Shah, F. M. (2022). 
-  *Maternal Health Risk Dataset*. UCI Machine Learning Repository. https://doi.org/10.24432/C5D02V
+- **Maternal Health Risk Dataset**
 
-- **Heart Disease Dataset**: Janosi, A., Steinbrunn, W., Pfisterer, M., & Detrano, R. (1988). 
-  *Heart Disease Dataset*. UCI Machine Learning Repository. https://doi.org/10.24432/C52P4X
+- **Heart Disease Dataset** 
 
-- **Air Quality Dataset**: De Vito, S., Massera, E., Piga, M., Martinotto, L., & Di Francia, G. (2008). 
-  *Air Quality Dataset*. UCI Machine Learning Repository. https://doi.org/10.24432/C5K88S
+- **Air Quality Dataset**
 
 **Repository Citation**:  
 University of California, Irvine. (2024). *UCI Machine Learning Repository*. 
