@@ -61,6 +61,20 @@ By the end of the course participants will:
 ## Pre-requisites
 Basic programming skills in R would be useful, but the course will still be accessible to those with limited or **NO prior experience** with R.
 
+## Citation
+
+```bibtex
+  @software{Chaudhuri_2025_ncrm_ai,
+  author       = {Chaudhuri, Somnath},
+  title        = {{Introduction to Machine Learning and Artificial Intelligence}},
+  year         = {2025},
+  organization = {National Centre for Research Methods, University of Southampton, UK},
+  url          = {https://github.com/SomGithub-Soton/ncrm_ai},
+  note         = {GitHub repository},
+}
+```
+
+
 ## Data Sources
 
 This project uses datasets from the UCI Machine Learning Repository:
@@ -73,7 +87,7 @@ This project uses datasets from the UCI Machine Learning Repository:
 
 - **Air Quality Dataset**
 
-**Repository Citation**:  
+**Data Repository Citation**:  
 University of California, Irvine. (2024). *UCI Machine Learning Repository*. 
 Irvine, CA: University of California, School of Information and Computer Sciences. 
 Retrieved from https://archive.ics.uci.edu/
